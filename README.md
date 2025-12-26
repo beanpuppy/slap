@@ -87,10 +87,15 @@ type Cmd enum {
 
 func main() {
 	// Simple: just the subcommand enum
-	slap.Run[Cmd]() ?
+	slap.Run[Cmd]() ? {
+		os.Exit(1)
+	}
 
 	// Or with global flags on a parent struct
-	app, sub := slap.ParseSub[App, Cmd]() ?
+	app, sub := slap.ParseSub[App, Cmd]() ? {
+		os.Exit(1)
+	}
+	
 	match sub {
 	case Cmd.Add(cmd): ...
 	case Cmd.Remove(cmd): ...
