@@ -1,0 +1,177 @@
+// Metadata types for slap CLI parser.
+package slap
+
+import (
+	"reflect"
+	"strings"
+
+	"github.com/halcyonnouveau/soppo/runtime"
+)
+
+// Runnable is implemented by commands that can be executed.
+type Runnable interface {
+	Run() error
+}
+
+// Validator is implemented by commands that need custom validation.
+type Validator interface {
+	Validate() error
+}
+
+type argMeta struct {
+	fieldName string
+	fieldIdx  int
+	position  int
+	name      string
+	help      string
+	required  bool
+	valueName string
+	last      bool
+	fieldType reflect.Type
+}
+
+type flagMeta struct {
+	fieldName string
+	fieldIdx  int
+	short     string
+	long      string
+	help      string
+	defValue  string
+	env       string
+	hidden    bool
+	global    bool
+	fieldType reflect.Type
+}
+
+type commandMeta struct {
+	name    string
+	about   string
+	version string
+	args    []argMeta
+	flags   []flagMeta
+}
+
+func buildMeta(target string, t reflect.Type) commandMeta {
+	meta := commandMeta{}
+
+	// Get Command attribute
+	if cmd, ok := runtime.GetAttr[Command](target, ""); ok {
+		meta.name = cmd.Name
+		meta.about = cmd.About
+		meta.version = cmd.Version
+	}
+
+	// Default name to lowercase type name
+	if meta.name == "" {
+		meta.name = strings.ToLower(t.Name())
+	}
+
+	// Iterate fields
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		fieldName := field.Name
+
+		// Check for Arg attribute
+		if arg, ok := runtime.GetAttr[Arg](target, fieldName); ok {
+			am := argMeta{
+				fieldName: fieldName,
+				fieldIdx:  i,
+				position:  arg.Position,
+				name:      arg.Name,
+				help:      arg.Help,
+				required:  arg.Required,
+				valueName: arg.ValueName,
+				last:      arg.Last,
+				fieldType: field.Type,
+			}
+
+			// Default name to field name
+			if am.name == "" {
+				am.name = fieldName
+			}
+
+			// Default valueName to uppercase name
+			if am.valueName == "" {
+				am.valueName = strings.ToUpper(am.name)
+			}
+
+			// Default required based on type (non-pointer, non-slice = required)
+			// unless explicitly set
+			if !arg.Required && !arg.Last {
+				var kind reflect.Kind = field.Type.Kind()
+				isPtr := kind == reflect.Ptr
+				isSlice := kind == reflect.Slice
+				am.required = !isPtr && !isSlice
+			}
+
+			meta.args = append(meta.args, am)
+		}
+
+		// Check for Flag attribute
+		if flag, ok := runtime.GetAttr[Flag](target, fieldName); ok {
+			fm := flagMeta{
+				fieldName: fieldName,
+				fieldIdx:  i,
+				short:     flag.Short,
+				long:      flag.Long,
+				help:      flag.Help,
+				defValue:  flag.Default,
+				env:       flag.Env,
+				hidden:    flag.Hidden,
+				global:    flag.Global,
+				fieldType: field.Type,
+			}
+
+			// Default long flag to lowercase field name
+			if fm.long == "" && fm.short == "" {
+				fm.long = strings.ToLower(fieldName)
+			}
+
+			meta.flags = append(meta.flags, fm)
+		}
+	}
+
+	// Sort args by position
+	sortArgs(meta.args)
+
+	return meta
+}
+
+func sortArgs(args []argMeta) {
+	// Simple bubble sort for small slices
+	for i := 0; i < len(args); i++ {
+		for j := i + 1; j < len(args); j++ {
+			if args[j].position < args[i].position {
+				args[i], args[j] = args[j], args[i]
+			}
+		}
+	}
+}
+
+// getTarget builds the runtime target name for a type.
+// Uses the package name from PkgPath to match what soppo codegen registers.
+func getTarget(t reflect.Type) string {
+	pkgPath := t.PkgPath()
+	typeName := t.Name()
+
+	// Extract the last path component as the package name
+	// e.g., "github.com/beanpuppy/slap/gen" -> "gen"
+	// But soppo generates with the source package name, not directory name
+	// So for "gen/" output dir with "package slap", we need "slap"
+	pkgName := pkgPath
+	if idx := strings.LastIndex(pkgPath, "/"); idx >= 0 {
+		pkgName = pkgPath[idx + 1:]
+	}
+
+	// Handle gen/ output directory - use parent directory's name
+	// gen/ is a common soppo output pattern where package name != directory name
+	if pkgName == "gen" {
+		// Extract the package name before /gen
+		parentPath := pkgPath[:len(pkgPath) - 4] // remove "/gen"
+		if idx := strings.LastIndex(parentPath, "/"); idx >= 0 {
+			pkgName = parentPath[idx + 1:]
+		}
+	}
+
+	return pkgName + "." + typeName
+}

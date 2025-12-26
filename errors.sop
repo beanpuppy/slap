@@ -1,0 +1,36 @@
+// Error types for slap CLI parser.
+package slap
+
+// ErrorKind represents the type of parse error.
+type ErrorKind enum {
+	MissingRequired
+	InvalidValue
+	UnknownFlag
+	UnknownArg
+	TooManyArgs
+	ValidationFailed
+	HelpRequested
+	VersionRequested
+	UnknownSubcommand
+}
+
+// ParseError represents a CLI parsing error.
+type ParseError struct {
+	Kind    ErrorKind
+	Field   string
+	Value   string
+	Message string
+}
+
+func (e ParseError) Error() string {
+	return e.Message
+}
+
+// errorAs is a helper since we can't use errors.As directly with enums
+func errorAs(err error, target *ParseError) bool {
+	if pe, ok := err.(ParseError); ok {
+		*target = pe
+		return true
+	}
+	return false
+}

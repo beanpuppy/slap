@@ -1,0 +1,51 @@
+// Example CLI app using slap.
+//
+// Usage:
+//   greet Alice              # prints "Hello, Alice!"
+//   greet --loud Alice       # prints "HELLO, ALICE!"
+//   greet -c 3 Alice         # prints greeting 3 times
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/beanpuppy/slap"
+)
+
+[slap.Command{Name: "greet", About: "Greet someone", Version: "1.0.0"}]
+type GreetCmd struct {
+	[slap.Arg{Position: 0, Help: "Name to greet"}]
+	Name string
+
+	[slap.Flag{Short: "c", Long: "count", Default: "1", Help: "Number of greetings"}]
+	Count int
+
+	[slap.Flag{Short: "l", Long: "loud", Help: "Shout the greeting"}]
+	Loud bool
+}
+
+func (cmd GreetCmd) Run() error {
+	for i := 0; i < cmd.Count; i++ {
+		msg := "Hello, {cmd.Name}!"
+		if cmd.Loud {
+			msg = strings.ToUpper(msg)
+		}
+		fmt.Println(msg)
+	}
+	return nil
+}
+
+// Single-variant enum - no subcommand name required
+[slap.Subcommands]
+type Cmd enum {
+	Greet GreetCmd
+}
+
+func main() {
+	slap.Run[Cmd]() ? err {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}

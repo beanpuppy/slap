@@ -1,0 +1,70 @@
+// Example CLI app demonstrating subcommands.
+//
+// Usage:
+//   todo add "Buy milk"      # adds a todo item
+//   todo list                # lists all items
+//   todo list --all          # lists all including completed
+//   todo done 1              # marks item 1 as done
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/beanpuppy/slap"
+)
+
+// Subcommand: add a new item
+[slap.Command{Name: "add", About: "Add a new todo item"}]
+type AddCmd struct {
+	[slap.Arg{Position: 0, Help: "Description of the item"}]
+	Description string
+}
+
+func (cmd AddCmd) Run() error {
+	fmt.Println("Added: {cmd.Description}")
+	return nil
+}
+
+// Subcommand: list all items
+[slap.Command{Name: "list", About: "List all todo items"}]
+type ListCmd struct {
+	[slap.Flag{Short: "a", Long: "all", Help: "Show completed items too"}]
+	All bool
+}
+
+func (cmd ListCmd) Run() error {
+	if cmd.All {
+		fmt.Println("Listing all items (including completed)")
+	} else {
+		fmt.Println("Listing pending items")
+	}
+	return nil
+}
+
+// Subcommand: mark an item as done
+[slap.Command{Name: "done", About: "Mark an item as completed"}]
+type DoneCmd struct {
+	[slap.Arg{Position: 0, Help: "Item number to mark as done"}]
+	Number int
+}
+
+func (cmd DoneCmd) Run() error {
+	fmt.Println("Marked item {cmd.Number} as done")
+	return nil
+}
+
+// Enum grouping all subcommands
+[slap.Subcommands]
+type Cmd enum {
+	Add  AddCmd
+	List ListCmd
+	Done DoneCmd
+}
+
+func main() {
+	slap.Run[Cmd]() ? err {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}

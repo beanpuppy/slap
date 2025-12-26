@@ -1,0 +1,4 @@
+github.com/halcyonnouveau/soppo v0.9.0 h1:JvoncoJao/MzfCot0L90ajdMT3qVSTVRGEXsRS2cv1I=
+github.com/halcyonnouveau/soppo v0.9.0/go.mod h1:dvk9uA5OT6Uc8yhKhkKzWavw0x3JOO5TN5UXdkM6bug=
+github.com/halcyonnouveau/soppo/runtime v0.2.0 h1:7JCQEv38UaOqgcrNmypS9YGTe9nORyGDpyCtMd4Q7/A=
+github.com/halcyonnouveau/soppo/runtime v0.2.0/go.mod h1:MxeGBK0DTVegrsTX8ltI9XAVlSOcokHHZustdqyRoJs=

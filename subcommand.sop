@@ -1,0 +1,488 @@
+// Subcommand support for slap CLI parser.
+//
+// Usage:
+//
+//	[slap.Command{Name: "add", About: "Add something"}]
+//	type AddCmd struct {
+//	    [slap.Arg{Position: 0}]
+//	    Name string
+//	}
+//
+//	[slap.Command{Name: "remove", About: "Remove something"}]
+//	type RemoveCmd struct {
+//	    [slap.Arg{Position: 0}]
+//	    Name string
+//	}
+//
+//	type SubCmd enum {
+//	    Add AddCmd
+//	    Remove RemoveCmd
+//	}
+//
+//	[slap.Command{Name: "myapp", About: "My application"}]
+//	type App struct {
+//	    [slap.Flag{Short: "v", Long: "verbose", Global: true}]
+//	    Verbose bool
+//	}
+//
+//	func main() {
+//	    app, sub := slap.ParseSub[App, SubCmd]() ?
+//	    match sub {
+//	    case SubCmd.Add(cmd):
+//	        // handle add
+//	    case SubCmd.Remove(cmd):
+//	        // handle remove
+//	    }
+//	}
+package slap
+
+import (
+	"fmt"
+	"os"
+	"reflect"
+	"strings"
+
+	"github.com/halcyonnouveau/soppo/runtime"
+)
+
+// subMeta holds metadata about a subcommand variant
+type subMeta struct {
+	name        string       // command name (from Command attr or lowercase variant name)
+	about       string       // description
+	variantIdx  int          // index in the enum
+	cmdType     reflect.Type // the command struct type (e.g., GreetCmd)
+	wrapperType reflect.Type // the enum wrapper struct type (e.g., Cmd_Greet)
+	hidden      bool         // hide from help output
+	aliases     []string     // alternative names for the subcommand
+}
+
+// ParseSub parses os.Args into a parent command P and subcommand enum S.
+func ParseSub[P any, S any]() (P, S, error) {
+	return ParseArgsSub[P, S](os.Args[1:].(!nil))
+}
+
+// ParseArgsSub parses the given arguments into parent P and subcommand S.
+func ParseArgsSub[P any, S any](args []string) (P, S, error) {
+	var parent P
+	var sub S
+
+	parentVal := reflect.ValueOf(&parent).Elem()
+	parentType := parentVal.Type()
+	parentTarget := getTarget(parentType)
+	parentMeta := buildMeta(parentTarget, parentType)
+
+	// Get subcommand enum info
+	subVal := reflect.ValueOf(&sub).Elem()
+	subType := subVal.Type()
+
+	// Discover subcommand variants
+	subs := discoverSubcommands(subType)
+	if len(subs) == 0 {
+		return parent, sub, ParseError{
+			Kind:    ErrorKind.InvalidValue,
+			Message: "no subcommands found in enum type",
+		}
+	}
+
+	// Check for help on parent (before subcommand)
+	for i, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			// Check if this is before any subcommand
+			foundSub := false
+			for j := 0; j < i; j++ {
+				for _, sm := range subs {
+					if matchesSubcommand(args[j], sm) {
+						foundSub = true
+						break
+					}
+				}
+			}
+			if !foundSub {
+				helpText := formatHelpWithSubs(&parentMeta, subs)
+				return parent, sub, ParseError{
+					Kind:    ErrorKind.HelpRequested,
+					Message: helpText,
+				}
+			}
+		}
+		if parentMeta.version != "" && (arg == "-V" || arg == "--version") {
+			return parent, sub, ParseError{
+				Kind:    ErrorKind.VersionRequested,
+				Message: parentMeta.name + " " + parentMeta.version,
+			}
+		}
+	}
+
+	// Split args into global flags and subcommand args
+	globalArgs := []string{}
+	subName := ""
+	subArgs := []string{}
+	foundSubIdx := -1
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		// Check if this is a subcommand name (or alias)
+		if subName == "" && !strings.HasPrefix(arg, "-") {
+			for j, sm := range subs {
+				if matchesSubcommand(arg, sm) {
+					subName = sm.name // Use canonical name, not alias
+					foundSubIdx = j
+					subArgs = args[i + 1:]
+					break
+				}
+			}
+			if subName != "" {
+				break
+			}
+		}
+
+		// Accumulate as global arg
+		globalArgs = append(globalArgs, arg)
+
+		// If this is a flag that takes a value, include the value too
+		if strings.HasPrefix(arg, "-") && !strings.Contains(arg, "=") {
+			// Check if it's a non-bool flag
+			flagName := arg
+			if strings.HasPrefix(arg, "--") {
+				flagName = arg[2:]
+			} else if len(arg) > 1 {
+				flagName = arg[1:2]
+			}
+
+			for _, fm := range parentMeta.flags {
+				if (fm.short == flagName || fm.long == flagName) && fm.global {
+					var fmKind reflect.Kind = fm.fieldType.Kind()
+					if fmKind != reflect.Bool && i + 1 < len(args) {
+						i++
+						globalArgs = append(globalArgs, args[i])
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// No subcommand found
+	if subName == "" {
+		// If single variant, use it as default (no subcommand name needed)
+		if len(subs) == 1 {
+			sm := subs[0]
+			foundSubIdx = 0
+			subName = sm.name
+			subArgs = globalArgs // All args go to the single command
+			globalArgs = []string{}
+		} else {
+			// Build list of available subcommands (excluding hidden ones)
+			names := []string{}
+			for _, sm := range subs {
+				if !sm.hidden {
+					names = append(names, sm.name)
+				}
+			}
+			return parent, sub, ParseError{
+				Kind:    ErrorKind.UnknownSubcommand,
+				Message: "missing subcommand. Available: " + strings.Join(names, ", "),
+			}
+		}
+	}
+
+	// Parse global flags into parent
+	// Only parse flags marked as Global
+	globalFlagsOnly := []flagMeta{}
+	for _, fm := range parentMeta.flags {
+		if fm.global {
+			globalFlagsOnly = append(globalFlagsOnly, fm)
+		}
+	}
+	globalMeta := commandMeta{
+		name:  parentMeta.name,
+		flags: globalFlagsOnly,
+	}
+
+	parseInto(parentVal, &globalMeta, globalArgs) ? err {
+		return parent, sub, err
+	}
+
+	// Parse subcommand
+	sm := subs[foundSubIdx]
+
+	// Check for help on subcommand
+	for _, arg := range subArgs {
+		if arg == "-h" || arg == "--help" {
+			subTarget := getTarget(sm.cmdType)
+			subCmdMeta := buildMeta(subTarget, sm.cmdType)
+			// Prepend parent name
+			subCmdMeta.name = parentMeta.name + " " + sm.name
+			helpText := formatHelp(&subCmdMeta)
+			return parent, sub, ParseError{
+				Kind:    ErrorKind.HelpRequested,
+				Message: helpText,
+			}
+		}
+	}
+
+	// Create and parse the subcommand
+	subCmdVal := reflect.New(sm.cmdType).Elem()
+	subTarget := getTarget(sm.cmdType)
+	subCmdMeta := buildMeta(subTarget, sm.cmdType)
+
+	parseInto(subCmdVal, &subCmdMeta, subArgs) ? err {
+		return parent, sub, err
+	}
+
+	// Set the enum variant
+	// The enum value has a Tag field (int) and a variant field
+	// We need to set Tag to the variant index and the variant field to our parsed value
+	setEnumVariant(subVal, sm.wrapperType, subCmdVal)
+
+	return parent, sub, nil
+}
+
+// RunSub parses and runs a command with subcommands.
+// Each subcommand must implement Runnable.
+func RunSub[P any, S any]() error {
+	parent, sub := ParseSub[P, S]() ? err {
+		var parseErr ParseError
+		if ok := errorAs(err, &parseErr); ok {
+			match parseErr.Kind {
+			case ErrorKind.HelpRequested:
+				fmt.Println(parseErr.Message)
+				return nil
+			case ErrorKind.VersionRequested:
+				fmt.Println(parseErr.Message)
+				return nil
+			default:
+				// Fall through
+			}
+		}
+		return err
+	}
+
+	// The subcommand is an enum - we need to extract and run it
+	_ = parent // Parent is available if needed
+	subVal := reflect.ValueOf(sub)
+
+	// Get the active variant value
+	// Soppo enums have a method that returns the inner value
+	if runner, ok := subVal.Interface().(Runnable); ok {
+		return runner.Run()
+	}
+
+	// Try to get the inner value and run it
+	// For soppo enums, we can use the Val field
+	if subVal.Kind() == reflect.Struct && subVal.NumField() >= 2 {
+		// Field 0 is Tag, field 1+ are variant values
+		tag := subVal.Field(0).Int()
+		if int(tag) >= 1 && int(tag) < subVal.NumField() {
+			variantVal := subVal.Field(int(tag))
+			if !variantVal.IsZero() {
+				if runner, ok := variantVal.Interface().(Runnable); ok {
+					return runner.Run()
+				}
+			}
+		}
+	}
+
+	return fmt.Errorf("subcommand does not implement Runnable")
+}
+
+// discoverSubcommands extracts subcommand metadata from an enum type
+func discoverSubcommands(t reflect.Type) []subMeta {
+	subs := []subMeta{}
+
+	// Get enum target name for registry lookup
+	enumTarget := getTarget(t)
+
+	// Get registered variants from runtime
+	variants := runtime.GetEnumVariants(enumTarget)
+
+	for i, variant := range variants {
+		// Get the type of the variant wrapper struct (e.g., Cmd_Greet)
+		wrapperType := reflect.TypeOf(variant.ValueType)
+
+		// For single-value variants, the wrapper has a Value field
+		// Get the command type from the Value field if present
+		var cmdType reflect.Type = wrapperType
+		if wrapperType.Kind() == reflect.Struct && wrapperType.NumField() > 0 {
+			// Check if first field is named "Value" (single-value variant)
+			field := wrapperType.Field(0)
+			if field.Name == "Value" {
+				cmdType = field.Type
+			}
+		}
+
+		// Get the Command attribute for this variant's command type
+		cmdTarget := getTarget(cmdType)
+		name := strings.ToLower(variant.Name)
+		about := ""
+
+		if cmd, ok := runtime.GetAttr[Command](cmdTarget, ""); ok {
+			if cmd.Name != "" {
+				name = cmd.Name
+			}
+			about = cmd.About
+		}
+
+		// Check for Hidden attribute on the variant
+		hidden := runtime.HasAttr[Hidden](enumTarget, variant.Name)
+
+		// Get all Alias attributes on the variant
+		aliases := []string{}
+		for _, alias := range runtime.GetAttrs[Alias](enumTarget, variant.Name) {
+			if alias.Name != "" {
+				aliases = append(aliases, alias.Name)
+			}
+		}
+
+		subs = append(subs, subMeta{
+			name:        name,
+			about:       about,
+			variantIdx:  i,
+			cmdType:     cmdType,
+			wrapperType: wrapperType,
+			hidden:      hidden,
+			aliases:     aliases,
+		})
+	}
+
+	return subs
+}
+
+// matchesSubcommand checks if an argument matches a subcommand's name or any of its aliases
+func matchesSubcommand(arg string, sm subMeta) bool {
+	if arg == sm.name {
+		return true
+	}
+	for _, alias := range sm.aliases {
+		if arg == alias {
+			return true
+		}
+	}
+	return false
+}
+
+// setEnumVariant sets the enum interface to a specific variant with value
+func setEnumVariant(enumVal reflect.Value, wrapperType reflect.Type, value reflect.Value) {
+	// Create a new instance of the wrapper struct
+	wrapper := reflect.New(wrapperType).Elem()
+
+	// If the wrapper has a Value field, set it to the parsed command
+	if valueField := wrapper.FieldByName("Value"); valueField.IsValid() {
+		valueField.Set(value)
+	}
+
+	// Set the interface to the wrapper
+	enumVal.Set(wrapper)
+}
+
+// formatHelpWithSubs formats help text including subcommands
+func formatHelpWithSubs(meta *commandMeta, subs []subMeta) string {
+	var b strings.Builder
+
+	// For single-variant enums, delegate to the variant's help
+	if len(subs) == 1 {
+		sm := subs[0]
+		subTarget := getTarget(sm.cmdType)
+		subCmdMeta := buildMeta(subTarget, sm.cmdType)
+		return formatHelp(&subCmdMeta)
+	}
+
+	// Get program name - prefer meta.name, fall back to os.Args[0] base name
+	progName := meta.name
+	if progName == "" || progName == "emptyparent" {
+		progName = os.Args[0]
+		if idx := strings.LastIndex(progName, "/"); idx >= 0 {
+			progName = progName[idx + 1:]
+		}
+	}
+
+	// Usage line
+	b.WriteString("Usage: ")
+	b.WriteString(progName)
+	b.WriteString(" [OPTIONS] <COMMAND>\n")
+
+	// Description
+	if meta.about != "" {
+		b.WriteString("\n")
+		b.WriteString(meta.about)
+		b.WriteString("\n")
+	}
+
+	// Commands section
+	b.WriteString("\nCommands:\n")
+	for _, sm := range subs {
+		// Skip hidden subcommands
+		if sm.hidden {
+			continue
+		}
+		b.WriteString("  ")
+		b.WriteString(sm.name)
+		// Show aliases if any
+		if len(sm.aliases) > 0 {
+			b.WriteString(" (")
+			b.WriteString(strings.Join(sm.aliases, ", "))
+			b.WriteString(")")
+		}
+		if sm.about != "" {
+			b.WriteString("  ")
+			b.WriteString(sm.about)
+		}
+		b.WriteString("\n")
+	}
+
+	// Global options
+	hasGlobal := false
+	for _, fm := range meta.flags {
+		if fm.global && !fm.hidden {
+			hasGlobal = true
+			break
+		}
+	}
+
+	if hasGlobal {
+		b.WriteString("\nGlobal Options:\n")
+		for _, fm := range meta.flags {
+			if !fm.global || fm.hidden {
+				continue
+			}
+
+			b.WriteString("  ")
+			if fm.short != "" {
+				b.WriteString("-")
+				b.WriteString(fm.short)
+				if fm.long != "" {
+					b.WriteString(", ")
+				}
+			} else {
+				b.WriteString("    ")
+			}
+
+			if fm.long != "" {
+				b.WriteString("--")
+				b.WriteString(fm.long)
+			}
+
+			var fmKind reflect.Kind = fm.fieldType.Kind()
+			if fmKind != reflect.Bool {
+				b.WriteString(" <")
+				b.WriteString(strings.ToUpper(fm.fieldName))
+				b.WriteString(">")
+			}
+
+			if fm.help != "" {
+				b.WriteString("  ")
+				b.WriteString(fm.help)
+			}
+
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString("  -h, --help  Print help\n")
+	if meta.version != "" {
+		b.WriteString("  -V, --version  Print version\n")
+	}
+
+	return b.String()
+}

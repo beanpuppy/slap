@@ -1,0 +1,55 @@
+// Attribute structs for slap CLI parser.
+package slap
+
+// Command marks a struct as a CLI command.
+type Command struct {
+	Name    string // Command name (defaults to lowercase struct name)
+	About   string // Short description
+	Version string // Version string
+}
+
+// Subcommands marks an enum as a collection of CLI subcommands.
+// This enables runtime discovery of enum variants for CLI parsing.
+type Subcommands struct{}
+
+// Hidden marks a subcommand variant as hidden from help output.
+// The subcommand can still be used, it just won't appear in --help.
+type Hidden struct{}
+
+// Alias adds an alternative name for a subcommand variant.
+// Multiple Alias attributes can be applied to add multiple aliases.
+type Alias struct {
+	Name string // Alternative name for the subcommand
+}
+
+// Arg marks a field as a positional argument.
+type Arg struct {
+	Position  int    // 0-based position index
+	Name      string // Display name (defaults to field name)
+	Help      string // Help text
+	Required  bool   // Required? (default: true for non-pointer types)
+	ValueName string // Placeholder in help, e.g. "<FILE>"
+	Last      bool   // Capture all remaining args (for []T fields)
+}
+
+// Flag marks a field as a CLI flag.
+type Flag struct {
+	Short   string // Short flag, e.g. "v" for -v
+	Long    string // Long flag (defaults to lowercase field name)
+	Help    string // Help text
+	Default string // Default value (as string, coerced to field type)
+	Env     string // Environment variable fallback
+	Hidden  bool   // Hide from help
+	Global  bool   // Available in subcommands
+}
+
+// Possible restricts values to a set of options.
+type Possible struct {
+	Values []string
+}
+
+// Range restricts numeric values to a range.
+type Range struct {
+	Min float64
+	Max float64
+}

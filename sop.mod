@@ -1,0 +1,2 @@
+include = ["**/*.sop"]
+output = "gen"
