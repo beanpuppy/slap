@@ -341,9 +341,10 @@ func TestParseUnknownFlag(t *testing.T) {
 }
 
 func TestParseMissingSubcommand(t *testing.T) {
+	// When no subcommand is provided, help is shown (not an error)
 	_, err := ParseArgs[MultiCmd]([]string{})
 	if err == nil {
-		t.Error("expected error for missing subcommand")
+		t.Error("expected help to be shown for missing subcommand")
 	}
 
 	parseErr, ok := err.(ParseError)
@@ -352,10 +353,10 @@ func TestParseMissingSubcommand(t *testing.T) {
 	}
 
 	switch parseErr.Kind.(type) {
-	case ErrorKind_UnknownSubcommand:
+	case ErrorKind_HelpRequested:
 	default:
-		// Expected
-		t.Errorf("expected UnknownSubcommand error, got %v", parseErr.Kind)
+		// Expected - shows help when no subcommand provided
+		t.Errorf("expected HelpRequested, got %v", parseErr.Kind)
 	}
 }
 

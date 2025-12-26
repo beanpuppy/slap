@@ -55,6 +55,7 @@ func (cmd DoneCmd) Run() error {
 }
 
 // Enum grouping all subcommands
+[slap.Command{Name: "todo", About: "A simple todo list manager"}]
 [slap.Subcommands]
 type Cmd enum {
 	Add  AddCmd

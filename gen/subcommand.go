@@ -79,6 +79,22 @@ func ParseArgsSub[P any, S any](args []string) (P, S, error) {
 	// Get subcommand enum info
 	subVal := reflect.ValueOf((&sub)).Elem()
 	subType := subVal.Type()
+	enumTarget := getTarget(subType)
+
+	// If parent is emptyParent, check if enum has Command attribute for app info
+	if parentMeta.name == "" || parentMeta.name == "emptyparent" {
+		if cmd, ok := runtime.GetAttr[Command](enumTarget, ""); ok {
+			if cmd.Name != "" {
+				parentMeta.name = cmd.Name
+			}
+			if cmd.About != "" {
+				parentMeta.about = cmd.About
+			}
+			if cmd.Version != "" {
+				parentMeta.version = cmd.Version
+			}
+		}
+	}
 
 	// Discover subcommand variants
 	subs := discoverSubcommands(subType)
@@ -180,16 +196,11 @@ func ParseArgsSub[P any, S any](args []string) (P, S, error) {
 			subArgs = globalArgs // All args go to the single command
 			globalArgs = []string{}
 		} else {
-			// Build list of available subcommands (excluding hidden ones)
-			names := []string{}
-			for _, sm := range subs {
-				if (!sm.hidden) {
-					names = append(names, sm.name)
-				}
-			}
+			// Show help when no subcommand is provided
+			helpText := formatHelpWithSubs((&parentMeta), subs)
 			return parent, sub, ParseError{
-				Kind: ErrorKindUnknownSubcommand,
-				Message: "missing subcommand. Available: " + strings.Join(names, ", "),
+				Kind: ErrorKindHelpRequested,
+				Message: helpText,
 			}
 		}
 	}
@@ -492,11 +503,19 @@ func formatHelpWithSubs(meta *commandMeta, subs []subMeta) string {
 
 			b.WriteString("\n")
 		}
-	}
 
-	b.WriteString("  -h, --help  Print help\n")
-	if meta.version != "" {
-		b.WriteString("  -V, --version  Print version\n")
+		// Add help/version under global options
+		b.WriteString("  -h, --help  Print help\n")
+		if meta.version != "" {
+			b.WriteString("  -V, --version  Print version\n")
+		}
+	} else {
+		// No global options - add Options section with help/version
+		b.WriteString("\nOptions:\n")
+		b.WriteString("  -h, --help  Print help\n")
+		if meta.version != "" {
+			b.WriteString("  -V, --version  Print version\n")
+		}
 	}
 
 	return b.String()

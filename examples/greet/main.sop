@@ -37,7 +37,6 @@ func (cmd GreetCmd) Run() error {
 	return nil
 }
 
-// Single-variant enum - no subcommand name required
 [slap.Subcommands]
 type Cmd enum {
 	Greet GreetCmd
