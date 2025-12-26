@@ -1,4 +1,4 @@
-# slap
+# Slap
 
 A clap-style CLI parser for [Soppo](https://github.com/halcyonnouveau/soppo).
 
