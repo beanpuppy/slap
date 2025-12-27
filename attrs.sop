@@ -27,7 +27,8 @@ type Arg struct {
 	Position  int    // 0-based position index
 	Name      string // Display name (defaults to field name)
 	Help      string // Help text
-	Required  bool   // Required? (default: true for non-pointer types)
+	Required  bool   // Force required even for pointer/slice types
+	Optional  bool   // Force optional even for non-pointer types
 	ValueName string // Placeholder in help, e.g. "<FILE>"
 	Last      bool   // Capture all remaining args (for []T fields)
 }

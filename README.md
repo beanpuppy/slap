@@ -63,7 +63,7 @@ Options:
 |-----------|--------|
 | `Command` | `Name`, `About`, `Version` |
 | `Subcommands` | Marks enum as subcommand container |
-| `Arg` | `Position`, `Help`, `Required`, `ValueName`, `Last` |
+| `Arg` | `Position`, `Help`, `Required`, `Optional`, `ValueName`, `Last` |
 | `Flag` | `Short`, `Long`, `Help`, `Default`, `Env`, `Hidden`, `Global` |
 | `Hidden` | Hide subcommand from help |
 | `Alias` | `Name` - alternative subcommand name |

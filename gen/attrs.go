@@ -35,6 +35,7 @@ type Arg struct {
 	Name string
 	Help string
 	Required bool
+	Optional bool
 	ValueName string
 	Last bool
 }
@@ -42,7 +43,8 @@ type Arg struct {
 // 0-based position index
 // Display name (defaults to field name)
 // Help text
-// Required? (default: true for non-pointer types)
+// Force required even for pointer/slice types
+// Force optional even for non-pointer types
 // Placeholder in help, e.g. "<FILE>"
 // Capture all remaining args (for []T fields)
 // Flag marks a field as a CLI flag.

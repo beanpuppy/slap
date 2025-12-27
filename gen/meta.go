@@ -77,7 +77,6 @@ func buildMeta(target string, t reflect.Type) commandMeta {
 				position: arg.Position,
 				name: arg.Name,
 				help: arg.Help,
-				required: arg.Required,
 				valueName: arg.ValueName,
 				last: arg.Last,
 				fieldType: field.Type,
@@ -93,13 +92,21 @@ func buildMeta(target string, t reflect.Type) commandMeta {
 				am.valueName = strings.ToUpper(am.name)
 			}
 
-			// Default required based on type (non-pointer, non-slice = required)
-			// unless explicitly set
-			if (!arg.Required) && (!arg.Last) {
-				var kind reflect.Kind = field.Type.Kind()
-				isPtr := kind == reflect.Ptr
-				isSlice := kind == reflect.Slice
-				am.required = (!isPtr) && (!isSlice)
+			// Determine if required
+			if arg.Required {
+				// Explicitly required
+				am.required = true
+			} else {
+				if arg.Optional || arg.Last {
+					// Explicitly optional or variadic
+					am.required = false
+				} else {
+					// Infer from type: pointers and slices are optional
+					var kind reflect.Kind = field.Type.Kind()
+					isPtr := kind == reflect.Ptr
+					isSlice := kind == reflect.Slice
+					am.required = (!isPtr) && (!isSlice)
+				}
 			}
 
 			meta.args = append(meta.args, am)
